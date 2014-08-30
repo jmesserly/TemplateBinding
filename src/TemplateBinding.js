@@ -518,36 +518,26 @@
 
       var map = getInstanceBindingMap(content, delegate_);
       var stagingDocument = getTemplateStagingDocument(this);
-      var instance = stagingDocument.createDocumentFragment();
+      var instance = stagingDocument.importNode(content, true);
       instance.templateCreator_ = this;
       instance.protoContent_ = content;
       instance.bindings_ = [];
-      instance.terminator_ = null;
+      // The terminator of the instance is the clone of the last child of the
+      // content. If the last child is an active template, it may produce
+      // instances as a result of production, so simply collecting the last
+      // child of the instance after it has finished producing may be wrong.
+      instance.terminator_ = instance.lastChild;
       var instanceRecord = instance.templateInstance_ = {
         firstNode: null,
         lastNode: null,
         model: model
       };
-
-      var i = 0;
-      var collectTerminator = false;
-      for (var child = content.firstChild; child; child = child.nextSibling) {
-        // The terminator of the instance is the clone of the last child of the
-        // content. If the last child is an active template, it may produce
-        // instances as a result of production, so simply collecting the last
-        // child of the instance after it has finished producing may be wrong.
-        if (child.nextSibling === null)
-          collectTerminator = true;
-
-        var clone = cloneAndBindInstance(child, instance, stagingDocument,
-                                         map.children[i++],
-                                         model,
-                                         delegate_,
-                                         instance.bindings_);
-        clone.templateInstance_ = instanceRecord;
-        if (collectTerminator)
-          instance.terminator_ = clone;
+      for (var c = instance.firstChild; c; c = c.nextSibling) {
+        c.templateInstance_ = instanceRecord;
       }
+
+      bindInstanceChildren(content, instance, map, model, delegate_,
+          instance.bindings_);
 
       instanceRecord.firstNode = instance.firstChild;
       instanceRecord.lastNode = instance.lastChild;
@@ -867,20 +857,28 @@
     return [];
   }
 
-  function cloneAndBindInstance(node, parent, stagingDocument, bindings, model,
-                                delegate,
-                                instanceBindings,
-                                instanceRecord) {
-    var clone = parent.appendChild(stagingDocument.importNode(node, false));
+  function bindInstanceChildren(node, clone, bindings, model, delegate,
+      instanceBindings) {
 
     var i = 0;
-    for (var child = node.firstChild; child; child = child.nextSibling) {
-      cloneAndBindInstance(child, clone, stagingDocument,
-                            bindings.children[i++],
-                            model,
-                            delegate,
-                            instanceBindings);
+    var child = node.firstChild;
+    var cloneChild = clone.firstChild;
+    while (child) {
+      var b = bindings.children[i++];
+      var child2 = cloneChild;
+
+      // Advance this first, in case it is a template that expands inline.
+      cloneChild = cloneChild.nextSibling;
+      bindInstance(child, child2, b, model, delegate, instanceBindings);
+      child = child.nextSibling;
     }
+  }
+
+  function bindInstance(node, clone, bindings, model, delegate,
+      instanceBindings) {
+
+    bindInstanceChildren(node, clone, bindings, model, delegate,
+        instanceBindings);
 
     if (bindings.isTemplate) {
       HTMLTemplateElement.decorate(clone, node);
@@ -889,7 +887,6 @@
     }
 
     processBindings(clone, bindings, model, instanceBindings);
-    return clone;
   }
 
   function createInstanceBindingMap(node, prepareBindingFn) {
